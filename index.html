@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#881819">
+<title>흔들기 카운터 — PROMPT RELAY 2026</title>
+<style>
+  :root{
+    --red:#881819; --cream:#F8F1DE; --navy:#16213F; --yellow:#FBBA00; --green:#1F5B3F;
+    --font:"Kakao","Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; overflow:hidden; }
+  body{
+    font-family:var(--font); background:var(--cream); color:var(--navy);
+    -webkit-user-select:none; user-select:none; touch-action:manipulation;
+    transition:background-color .3s ease, color .3s ease;
+  }
+  .wrap{ position:fixed; inset:0; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; padding:24px 20px;
+         padding-bottom:calc(24px + env(safe-area-inset-bottom)); text-align:center; }
+  .scr{ display:none; width:100%; max-width:480px; }
+  .scr.on{ display:block; }
+
+  .badge{ display:inline-block; font-size:12px; font-weight:800; letter-spacing:.16em;
+          color:var(--cream); background:var(--navy); padding:6px 14px; border-radius:20px; }
+  h1{ font-size:30px; font-weight:800; letter-spacing:-.02em; margin-top:16px; line-height:1.25; }
+  .sub{ font-size:15px; color:#6C6257; margin-top:10px; line-height:1.6; }
+
+  .btn{ display:block; width:100%; margin-top:26px; padding:20px; border:0; border-radius:14px;
+        background:var(--red); color:var(--cream); font-family:var(--font);
+        font-size:20px; font-weight:800; cursor:pointer; }
+  .btn:active{ transform:scale(.985); }
+  .btn.ghost{ background:transparent; color:var(--navy); border:1.5px solid #C9BFA8;
+              font-size:15px; padding:14px; margin-top:12px; }
+
+  .note{ font-size:13px; color:#8A8075; margin-top:18px; line-height:1.6; }
+  .note b{ color:var(--red); }
+
+  /* 카운트다운 */
+  #scrReady .cd{ font-size:120px; font-weight:800; color:var(--navy); line-height:1; }
+
+  /* 측정 중 */
+  body.run{ background:var(--red); color:var(--cream); }
+  body.run .sub{ color:#F0D3CE; }
+  .timer{ font-size:17px; font-weight:800; letter-spacing:.1em; color:var(--yellow); }
+  .bar{ width:100%; height:8px; background:rgba(255,255,255,.22); border-radius:4px;
+        overflow:hidden; margin-top:14px; }
+  .bar i{ display:block; height:100%; width:100%; background:var(--yellow); border-radius:4px; }
+  .count{ font-size:112px; font-weight:800; line-height:1.05; margin-top:26px;
+          color:#FFFFFF; font-variant-numeric:tabular-nums; transition:transform .06s ease; }
+  .count.pop{ transform:scale(1.07); }
+  .hint{ font-size:16px; color:#F0D3CE; margin-top:8px; }
+
+  /* 결과 */
+  body.done{ background:var(--navy); color:var(--cream); }
+  body.done .sub{ color:#B8C0D0; }
+  .final{ font-size:104px; font-weight:800; line-height:1.05; color:var(--yellow);
+          font-variant-numeric:tabular-nums; margin-top:8px; }
+  body.done .btn{ background:var(--yellow); color:var(--navy); }
+  body.done .btn.ghost{ background:transparent; color:#B8C0D0; border-color:#3A4763; }
+
+  .tapzone{ position:fixed; inset:0; z-index:5; display:none; }
+  body.tapmode.run .tapzone{ display:block; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- 1. 시작 -->
+  <section class="scr on" id="scrStart">
+    <span class="badge">1회차 · 지구력</span>
+    <h1>흔들기 카운터</h1>
+    <p class="sub">시작을 누르면 3초 뒤에 시작합니다.<br><b id="secLabel">100초</b> 동안 힘껏 흔들어주세요.</p>
+    <button class="btn" id="btnStart">시작하기</button>
+    <p class="note" id="startNote"></p>
+  </section>
+
+  <!-- 2. 카운트다운 -->
+  <section class="scr" id="scrReady">
+    <p class="sub">준비!</p>
+    <div class="cd" id="cd">3</div>
+  </section>
+
+  <!-- 3. 측정 -->
+  <section class="scr" id="scrRun">
+    <div class="timer" id="timer">100.0</div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="count" id="count">0</div>
+    <p class="hint" id="runHint">흔드세요!</p>
+  </section>
+
+  <!-- 4. 결과 -->
+  <section class="scr" id="scrDone">
+    <p class="sub">끝!</p>
+    <div class="final" id="final">0</div>
+    <p class="sub">이 숫자를 진행요원에게 알려주세요</p>
+    <button class="btn" id="btnAgain">다시 하기</button>
+    <p class="note" id="doneNote"></p>
+  </section>
+
+</div>
+<div class="tapzone" id="tapzone"></div>
+
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var SECONDS   = Math.max(5, parseInt(q.get('s') || '100', 10));
+  var THRESHOLD = parseFloat(q.get('t') || '55');   // 흔들기 판정 민감도
+  var GAP       = parseInt(q.get('g') || '110', 10); // 같은 흔들기 중복 방지 (ms)
+
+  var $ = function(id){ return document.getElementById(id); };
+  var body = document.body;
+  var screens = { start:$('scrStart'), ready:$('scrReady'), run:$('scrRun'), done:$('scrDone') };
+  var count = 0, running = false, motionOn = false, wakeLock = null;
+  var last = null, lastT = 0, lastHit = 0, endAt = 0, rafId = null;
+
+  $('secLabel').textContent = SECONDS + '초';
+
+  function screen(name){
+    for (var k in screens) screens[k].classList.toggle('on', k === name);
+    body.classList.toggle('run', name === 'run');
+    body.classList.toggle('done', name === 'done');
+  }
+
+  function bump(){
+    count++;
+    var el = $('count');
+    el.textContent = count;
+    el.classList.add('pop');
+    setTimeout(function(){ el.classList.remove('pop'); }, 60);
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+  }
+
+  function onMotion(e){
+    if (!running) return;
+    var a = e.accelerationIncludingGravity || e.acceleration;
+    if (!a || a.x === null) return;
+    var now = e.timeStamp || Date.now();
+    if (!last) { last = {x:a.x, y:a.y, z:a.z}; lastT = now; return; }
+    var dt = now - lastT;
+    if (dt < 16) return;
+    var delta = Math.abs(a.x - last.x) + Math.abs(a.y - last.y) + Math.abs(a.z - last.z);
+    var speed = delta / dt * 1000;
+    last = {x:a.x, y:a.y, z:a.z}; lastT = now;
+    var t = Date.now();
+    if (speed > THRESHOLD && t - lastHit > GAP) { lastHit = t; bump(); }
+  }
+
+  function tick(){
+    clearInterval(rafId);
+    rafId = setInterval(function(){
+      var left = Math.max(0, endAt - Date.now());
+      $('timer').textContent = (left / 1000).toFixed(1);
+      $('barFill').style.width = (left / (SECONDS * 1000) * 100) + '%';
+      if (left <= 0) finish();
+    }, 50);
+  }
+
+  function finish(){
+    running = false;
+    clearInterval(rafId);
+    window.removeEventListener('devicemotion', onMotion);
+    $('final').textContent = count;
+    try {
+      var log = JSON.parse(localStorage.getItem('pr2026-shake') || '[]');
+      log.unshift({ n: count, at: new Date().toISOString(), mode: motionOn ? 'shake' : 'tap' });
+      localStorage.setItem('pr2026-shake', JSON.stringify(log.slice(0, 20)));
+    } catch(e){}
+    if (wakeLock) { try { wakeLock.release(); } catch(e){} wakeLock = null; }
+    if (navigator.vibrate) { try { navigator.vibrate([60, 50, 60]); } catch(e){} }
+    screen('done');
+    $('doneNote').innerHTML = motionOn
+      ? '흔들기로 측정했습니다'
+      : '<b>화면 두드리기</b>로 측정했습니다';
+  }
+
+  function begin(){
+    count = 0; last = null; lastT = 0; lastHit = 0;
+    $('count').textContent = '0';
+    screen('ready');
+    var n = 3;
+    $('cd').textContent = n;
+    var iv = setInterval(function(){
+      n--;
+      if (n > 0) { $('cd').textContent = n; if (navigator.vibrate) try{ navigator.vibrate(20); }catch(e){} }
+      else {
+        clearInterval(iv);
+        running = true;
+        endAt = Date.now() + SECONDS * 1000;
+        if (motionOn) window.addEventListener('devicemotion', onMotion);
+        $('runHint').textContent = motionOn ? '흔드세요!' : '화면을 두드리세요!';
+        screen('run');
+        if (navigator.vibrate) try{ navigator.vibrate(120); }catch(e){}
+        watchdog();
+        tick();
+      }
+    }, 1000);
+  }
+
+  async function keepAwake(){
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e){}
+  }
+
+  async function start(){
+    var needAsk = typeof DeviceMotionEvent !== 'undefined' &&
+                  typeof DeviceMotionEvent.requestPermission === 'function';
+    if (needAsk) {
+      try {
+        var res = await DeviceMotionEvent.requestPermission();
+        motionOn = (res === 'granted');
+      } catch(e) { motionOn = false; }
+    } else {
+      motionOn = (typeof DeviceMotionEvent !== 'undefined');
+    }
+    keepAwake();
+    begin();
+  }
+
+  // ── 센서 사용 가능 여부를 먼저 판단해 안내 ──
+  var forceTap  = (q.get('mode') || '') === 'tap';
+  var hasMotion = typeof DeviceMotionEvent !== 'undefined';
+  var needAsk   = hasMotion && typeof DeviceMotionEvent.requestPermission === 'function';
+  var blocked   = forceTap || !hasMotion || (needAsk && !window.isSecureContext);
+
+  if (blocked) {
+    body.classList.add('tapmode');
+    $('startNote').innerHTML = forceTap
+      ? '<b>화면 두드리기</b> 방식으로 진행합니다'
+      : (!hasMotion
+        ? '이 브라우저는 동작 센서를 지원하지 않아 <b>화면 두드리기</b>로 진행합니다'
+        : '주소가 <b>https</b> 가 아니라 센서를 쓸 수 없어 <b>화면 두드리기</b>로 진행합니다');
+  } else if (needAsk) {
+    $('startNote').innerHTML = '시작을 누르면 동작 센서 사용을 물어봅니다 — <b>허용</b>을 눌러주세요';
+  }
+
+  async function start(){
+    if (blocked) { motionOn = false; }
+    else if (needAsk) {
+      // 권한 팝업이 응답하지 않아도 멈추지 않도록 12초 제한
+      var ask = DeviceMotionEvent.requestPermission().catch(function(){ return 'denied'; });
+      var timeout = new Promise(function(res){ setTimeout(function(){ res('timeout'); }, 12000); });
+      motionOn = (await Promise.race([ask, timeout])) === 'granted';
+      if (!motionOn) {
+        body.classList.add('tapmode');
+        $('runHint').textContent = '센서 사용을 거부해서 두드리기로 진행합니다';
+      }
+    } else { motionOn = true; }
+    keepAwake();
+    begin();
+  }
+
+  $('btnStart').addEventListener('click', start);
+  $('btnAgain').addEventListener('click', function(){
+    if (!motionOn) body.classList.add('tapmode');
+    keepAwake(); begin();
+  });
+  $('tapzone').addEventListener('pointerdown', function(e){ e.preventDefault(); if (running) bump(); });
+
+  // 센서를 켰는데 값이 안 들어오면 두드리기로 자동 전환
+  function watchdog(){
+    setTimeout(function(){
+      if (running && motionOn && last === null) {
+        motionOn = false;
+        body.classList.add('tapmode');
+        $('runHint').textContent = '센서가 응답하지 않아 두드리기로 전환했습니다';
+      }
+    }, 2500);
+  }
+
+})();
+</script>
+</body>
+</html>
