@@ -108,14 +108,16 @@
 (function(){
   var q = new URLSearchParams(location.search);
   var SECONDS   = Math.max(5, parseInt(q.get('s') || '100', 10));
-  var THRESHOLD = parseFloat(q.get('t') || '300');   // 흔들기 판정 민감도
-  var GAP       = parseInt(q.get('g') || '200', 10); // 같은 흔들기 중복 방지 (ms)
+  var HI    = parseFloat(q.get('hi')  || '5');      // 흔들기로 인정할 최소 세기 (m/s^2)
+  var MINMS = parseInt(q.get('min') || '40', 10);  // 그 세기가 이어져야 하는 최소 시간 (ms)
+  var GAP   = parseInt(q.get('g')   || '120', 10); // 같은 흔들기 중복 방지 (ms)
+  var LO    = HI * 0.35;                           // 여기까지 내려와야 다음 흔들기로 친다
 
   var $ = function(id){ return document.getElementById(id); };
   var body = document.body;
   var screens = { start:$('scrStart'), ready:$('scrReady'), run:$('scrRun'), done:$('scrDone') };
   var count = 0, running = false, motionOn = false, wakeLock = null;
-  var last = null, lastT = 0, lastHit = 0, endAt = 0, rafId = null;
+  var up = false, upAt = 0, lastHit = 0, endAt = 0, rafId = null;
 
   $('secLabel').textContent = SECONDS + '초';
 
@@ -134,19 +136,25 @@
     if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
   }
 
+  // 순간 세기만 보면 손가락으로 툭 치는 충격이 크게 흔드는 것보다 높게 잡힌다.
+  // 흔들기는 가속이 일정 시간 '이어지고' 툭 치기는 한순간 스파이크로 끝난다.
+  // 그래서 세기가 HI 이상으로 MINMS 이상 유지된 뒤 LO 아래로 내려올 때만 한 번으로 센다.
   function onMotion(e){
     if (!running) return;
     var a = e.accelerationIncludingGravity || e.acceleration;
     if (!a || a.x === null) return;
-    var now = e.timeStamp || Date.now();
-    if (!last) { last = {x:a.x, y:a.y, z:a.z}; lastT = now; return; }
-    var dt = now - lastT;
-    if (dt < 16) return;
-    var delta = Math.abs(a.x - last.x) + Math.abs(a.y - last.y) + Math.abs(a.z - last.z);
-    var speed = delta / dt * 1000;
-    last = {x:a.x, y:a.y, z:a.z}; lastT = now;
+
+    // 가속도 벡터의 크기에서 중력(9.8)을 빼면 '움직인 양'만 남는다.
+    // 축을 따로 보지 않으므로 폰을 어떻게 쥐거나 돌려도 같은 기준이 된다.
+    var m = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - 9.8);
+
     var t = Date.now();
-    if (speed > THRESHOLD && t - lastHit > GAP) { lastHit = t; bump(); }
+    if (!up) {
+      if (m >= HI) { up = true; upAt = t; }
+    } else if (m <= LO) {
+      if (t - upAt >= MINMS && t - lastHit > GAP) { lastHit = t; bump(); }
+      up = false;
+    }
   }
 
   function tick(){
@@ -178,7 +186,7 @@
   }
 
   function begin(){
-    count = 0; last = null; lastT = 0; lastHit = 0;
+    count = 0; up = false; upAt = 0; lastHit = 0;
     $('count').textContent = '0';
     screen('ready');
     var n = 3;
