@@ -108,7 +108,7 @@
 (function(){
   var q = new URLSearchParams(location.search);
   var SECONDS   = Math.max(5, parseInt(q.get('s') || '100', 10));
-  var THRESHOLD = parseFloat(q.get('t') || '150');   // 흔들기 판정 민감도
+  var THRESHOLD = parseFloat(q.get('t') || '300');   // 흔들기 판정 민감도
   var GAP       = parseInt(q.get('g') || '200', 10); // 같은 흔들기 중복 방지 (ms)
 
   var $ = function(id){ return document.getElementById(id); };
